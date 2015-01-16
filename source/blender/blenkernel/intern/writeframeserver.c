@@ -34,6 +34,7 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <time.h>
 
 #if defined(_WIN32)
 #include <winsock2.h>
@@ -67,11 +68,19 @@
 
 #include "DNA_scene_types.h"
 
+#define SOCK_CLOSE(s) closesocket(s); s = -1
+
 static int sock;
 static int connsock;
 static int write_ppm;
 static int render_width;
 static int render_height;
+
+static bool process_one_frame = true;
+static int current_frame;
+
+static int next_frame(RenderData *rd);
+static int change_active_request(char *req)
 
 
 #if defined(_WIN32)
@@ -110,12 +119,16 @@ static int closesocket(int fd)
 }
 #endif
 
-int BKE_frameserver_start(struct Scene *scene, RenderData *UNUSED(rd), int rectx, int recty, ReportList *reports)
+/* XXX: Have to check if this is used somewhere else */
+int BKE_server_start(struct ReportList *reports)
 {
 	struct sockaddr_in addr;
 	int arg = 1;
 	
-	(void)scene; /* unused */
+	if (sock != 0) {
+		/* Server already running */
+		return 1;
+	}
 
 	if (!startup_socket_system()) {
 		BKE_report(reports, RPT_ERROR, "Cannot startup socket system");
@@ -145,10 +158,36 @@ int BKE_frameserver_start(struct Scene *scene, RenderData *UNUSED(rd), int rectx
 		BKE_report(reports, RPT_ERROR, "Cannot establish listen backlog");
 		return 0;
 	}
-	connsock = -1;
+
+	if (connsock != -1) {
+		SOCK_CLOSE(connsock);
+	}
+
+	return 1;
+}
+
+void BKE_server_stop(void)
+{
+	if (connsock != -1) {
+		SOCK_CLOSE(connsock);
+	}
+	closesocket(sock);
+	sock = 0;
+	shutdown_socket_system();
+}
+
+int BKE_frameserver_start(struct Scene *scene, RenderData *UNUSED(rd), int rectx, int recty, ReportList *reports)
+{
+	(void)scene; /* unused */
+
+	if (!BKE_server_start(reports)) {
+		return 0;
+	}
 
 	render_width = rectx;
 	render_height = recty;
+
+	current_frame = rd->sfra;
 
 	return 1;
 }
@@ -197,11 +236,28 @@ static int safe_puts(char *s)
 	return safe_write(s, strlen(s));
 }
 
+static int next_frame(RenderData *rd)
+{
+	currframe += 1;
+	printf(".");
+	if (current_frame > rd->efra) {
+		printf(".\n");
+		G.is_break = true;
+		return -1;
+	}
+	return (current_frame - 1);
+}
+
 static int handle_request(RenderData *rd, char *req)
 {
 	char *p;
 	char *path;
 	int pathlen;
+
+	/* This will stop the render */
+	if (req[0] == '\0') {
+		return next_frame(rd);
+	}
 
 	if (memcmp(req, "GET ", 4) != 0) {
 		return -1;
@@ -222,6 +278,28 @@ static int handle_request(RenderData *rd, char *req)
 	write_ppm = 0;
 	pathlen = strlen(path);
 
+	/* Resets the render. This will stop the actual render. */
+	if (pathlen > 12 && memcmp(path, "/new_render?", 12) == 0) {
+		char buf[4096];
+		if (change_active_request(path+12 != 0)) {
+			sprintf(buf,
+				"HTTP/1.1 200 OK\r\n"
+				"Content-Type: text/html\r\n"
+				"\r\n"
+				"error\n"
+			);
+		} else {
+			sprintf(buf,
+				"HTTP/1.1 200 OK\r\n"
+				"Content-Type: text/html\r\n"
+				"\r\n"
+				"ok\n"
+			);
+		}
+		safe_puts(buf);
+		G.is_break = true;
+		return -1;
+	}
 	if (pathlen > 12 && memcmp(path, "/images/ppm/", 12) == 0) {
 		write_ppm = 1;
 		return atoi(path + 12);
@@ -230,22 +308,22 @@ static int handle_request(RenderData *rd, char *req)
 		char buf[4096];
 
 		sprintf(buf,
-		        "HTTP/1.1 200 OK\r\n"
-		        "Content-Type: text/html\r\n"
-		        "\r\n"
-		        "start %d\n"
-		        "end %d\n"
-		        "width %d\n"
-		        "height %d\n"
-		        "rate %d\n"
-		        "ratescale %d\n",
-		        rd->sfra,
-		        rd->efra,
-		        render_width,
-		        render_height,
-		        rd->frs_sec,
-		        1
-		        );
+				"HTTP/1.1 200 OK\r\n"
+				"Content-Type: text/html\r\n"
+				"\r\n"
+				"start %d\n"
+				"end %d\n"
+				"width %d\n"
+				"height %d\n"
+				"rate %d\n"
+				"ratescale %d\n",
+				rd->sfra,
+				rd->efra,
+				render_width,
+				render_height,
+				rd->frs_sec,
+				1
+				);
 
 		safe_puts(buf);
 		return -1;
@@ -258,7 +336,7 @@ static int handle_request(RenderData *rd, char *req)
 	return -1;
 }
 
-int BKE_frameserver_loop(RenderData *rd, ReportList *UNUSED(reports))
+int BKE_frameserver_loop(RenderData *rd, ReportList *reports)
 {
 	fd_set readfds;
 	struct timeval tv;
@@ -271,63 +349,56 @@ int BKE_frameserver_loop(RenderData *rd, ReportList *UNUSED(reports))
 #endif
 	char buf[4096];
 
-	if (connsock != -1) {
-		closesocket(connsock);
-		connsock = -1;
-	}
-
-	tv.tv_sec = 1;
-	tv.tv_usec = 0;
-
-	FD_ZERO(&readfds);
-	FD_SET(sock, &readfds);
-
-	rval = select(sock + 1, &readfds, NULL, NULL, &tv);
-	if (rval < 0) {
-		return -1;
-	}
-
-	if (rval == 0) { /* nothing to be done */
-		return -1;
-	}
-
 	socklen = sizeof(addr);
 
-	if ((connsock = accept(sock, (struct sockaddr *)&addr, &socklen)) < 0) {
-		return -1;
-	}
-
-	FD_ZERO(&readfds);
-	FD_SET(connsock, &readfds);
-
-	for (;;) {
-		/* give 10 seconds for telnet testing... */
-		tv.tv_sec = 10;
-		tv.tv_usec = 0;
-
-		rval = select(connsock + 1, &readfds, NULL, NULL, &tv);
-		if (rval > 0) {
-			break;
-		}
-		else if (rval == 0) {
+	/* accept a new connection to the server*/
+	if (connsock == -1) {
+		if ((connsock = accept(sock, (struct sockaddr *) &addr, socklen)) < 0) {
+			BKE_report(reports, RPT_ERROR, "accept fail");
 			return -1;
 		}
-		else if (rval < 0) {
-			if (!select_was_interrupted_by_signal()) {
-				return -1;
-			}
-		}
 	}
 
-	len = recv(connsock, buf, sizeof(buf) - 1, 0);
+	if (connsock == -1) {
+		FD_ZERO(&readfds);
+		FD_SET(sock, &readfds);
 
-	if (len < 0) {
+		for (;;) {
+			tv.tv_sec = 10;
+			tv.tv_usec = 0;
+
+			rval = select(connsock + 1, &readfds, NULL, NULL, &tv);
+			if (rval > 0) {
+				break;
+			}
+			else if (rval == 0) {
+				return -1;
+			}
+			else if (rval < 0) {
+				if (!select_was_interrupted_by_signal()) {
+					return -1;
+				}
+			}
+		}
+
+		len = recv(connsock, buf, sizeof(buf) - 1, 0);
+		
+		if (len < 0) {
+			return 0;
+		}
+		buf[len] = 0;
+	} else {
+		buf[0] = '\0';
+	}
+
+	rval = handle_request(rd, buf);
+
+	if (rval == -1 && connsock != -1) {
+		SOCK_CLOSE(connsock);
 		return -1;
 	}
 
-	buf[len] = 0;
-
-	return handle_request(rd, buf);
+	return rval;
 }
 
 static void serve_ppm(int *pixels, int rectx, int recty)
@@ -336,19 +407,36 @@ static void serve_ppm(int *pixels, int rectx, int recty)
 	unsigned char *row = (unsigned char *) malloc(render_width * 3);
 	int y;
 	char header[1024];
+	int rval;
 
+	/* We only need the HTTP header once */
+	if (current_frame == 0 || process_one_frame) {
+		sprintf(header,
+				"HTTP/1.1 200 OK\r\n"
+				"Content-Type: image/ppm\r\n"
+				"Connection: close\r\n"
+				"\r\n");
+		rval = safe_puts(header);
+		if (rval < 0) {
+			SOCK_CLOSE(connsock);
+			G.is_break = true;
+			return;
+		}
+	}
+
+	/* PPM Header */
 	sprintf(header,
-	        "HTTP/1.1 200 OK\r\n"
-	        "Content-Type: image/ppm\r\n"
-	        "Connection: close\r\n"
-	        "\r\n"
-	        "P6\n"
-	        "# Creator: blender frameserver v0.0.1\n"
-	        "%d %d\n"
-	        "255\n",
-	        rectx, recty);
-
-	safe_puts(header);
+			"P6\n"
+			"# Creator: blender frameserver v0.0.2\n"
+			"%d %d\n"
+			"255\n",
+			rectx, recty);
+	rval = safe_puts(header);
+	if (rval < 0) {
+		SOCK_CLOSE(connsock);
+		G.is_break = true;
+		return;
+	}
 
 	rendered_frame = (unsigned char *)pixels;
 
@@ -364,23 +452,27 @@ static void serve_ppm(int *pixels, int rectx, int recty)
 			target += 3;
 			src += 4;
 		}
-		safe_write((char *)row, 3 * rectx);
+		rval = safe_write((char *)row, 3 * rectx);
+		if (rval < 0) {
+			SOCK_CLOSE(connsock);
+			G.is_break = true;
+			return;
+		}
+	}
+	if (process_one_frame) {
+		SOCK_CLOSE(connsock);
 	}
 	free(row);
-	closesocket(connsock);
-	connsock = -1;
 }
 
 int BKE_frameserver_append(RenderData *UNUSED(rd), int UNUSED(start_frame), int frame, int *pixels,
                            int rectx, int recty, ReportList *UNUSED(reports))
 {
-	fprintf(stderr, "Serving frame: %d\n", frame);
 	if (write_ppm) {
 		serve_ppm(pixels, rectx, recty);
 	}
-	if (connsock != -1) {
-		closesocket(connsock);
-		connsock = -1;
+	if (process_one_frame && connsock != -1) {
+		SOCK_CLOSE(connsock);
 	}
 
 	return 1;
@@ -388,12 +480,42 @@ int BKE_frameserver_append(RenderData *UNUSED(rd), int UNUSED(start_frame), int 
 
 void BKE_frameserver_end(void)
 {
+    /* Only close the client socket. the server socket needs to
+     * be closed in a explicit way (see BKE_server_stop) */
 	if (connsock != -1) {
-		closesocket(connsock);
-		connsock = -1;
+		SOCK_CLOSE(connsock);
 	}
-	closesocket(sock);
-	shutdown_socket_system();
+}
+
+/* Python module section */
+
+static char _last_request[REQUEST_MAX_LEN] = "";
+
+static int change_active_request(char *req)
+{
+	time_t timer;
+	char time_buffer[25];
+	struct tm *tm_info;
+
+	time(&timer);
+	tm_info = localtime(&timer);
+
+	strftime(time_buffer, 25, "%Y:%m:%d %H:%M:%S", tm_info);
+	fprintf(stderr, "[%s] New request with params: %s\n", time_buffer, req);
+
+	strncpy(_last_request, req, REQUEST_MAX_LEN);
+	_last_request[REQUEST_MAX_LEN-1] = '\0';
+	return 0;
+}
+
+void BKE_frameserver_get_request(char *dest)
+{
+	strncpy(dest, _last_request, REQ_MAX_LEN);
+}
+
+void BKE_frameserver_process_one_frame(int b)
+{
+	process_one_frame = (bool) b;
 }
 
 #endif /* WITH_FRAMESERVER */

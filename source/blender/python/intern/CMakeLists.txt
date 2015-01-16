@@ -45,6 +45,7 @@ set(INC_SYS
 
 set(SRC
 	gpu.c
+	frameserver.c
 	bpy.c
 	bpy_app.c
 	bpy_app_ffmpeg.c
@@ -72,6 +73,7 @@ set(SRC
 	stubs.c
 
 	gpu.h
+	frameserver.h
 	bpy.h
 	bpy_app.h
 	bpy_app_ffmpeg.h

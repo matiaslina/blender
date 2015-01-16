@@ -36,15 +36,25 @@
 extern "C" {
 #endif
 
+#define REQ_MAX_LEN 4096
+
 struct RenderData;	
 struct ReportList;
 struct Scene;
+
+/* Server side functions. Posibly it will be privates on the future */
+int BKE_server_start(struct ReportList *reports);
+void BKE_server_stop(void);
 
 int BKE_frameserver_start(struct Scene *scene, struct RenderData *rd, int rectx, int recty, struct ReportList *reports);
 void BKE_frameserver_end(void);
 int BKE_frameserver_append(struct RenderData *rd, int start_frame, int frame, int *pixels,
                            int rectx, int recty, struct ReportList *reports);
 int BKE_frameserver_loop(struct RenderData *rd, struct ReportList *reports);
+
+/* Python api */
+void BKE_frameserver_only_one_frame(int b);
+void BKE_frameserver_get_request(char *dest);
 
 #ifdef __cplusplus
 }
