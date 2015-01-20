@@ -115,7 +115,7 @@ static PyObject *FRAMESERVER_only_one_frame(PyObject *UNUSED(self), PyObject *ar
     if (!PyArg_ParseTuple(args, "i", &param)) {
         Py_RETURN_FALSE;
     }
-    BKE_frameserver_only_one_frame(param);
+    BKE_frameserver_process_one_frame(param);
     Py_RETURN_TRUE;
 }
 

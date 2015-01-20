@@ -53,7 +53,7 @@ int BKE_frameserver_append(struct RenderData *rd, int start_frame, int frame, in
 int BKE_frameserver_loop(struct RenderData *rd, struct ReportList *reports);
 
 /* Python api */
-void BKE_frameserver_only_one_frame(int b);
+void BKE_frameserver_process_one_frame(int b);
 void BKE_frameserver_get_request(char *dest);
 
 #ifdef __cplusplus

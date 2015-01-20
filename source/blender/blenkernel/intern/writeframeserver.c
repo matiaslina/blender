@@ -80,7 +80,7 @@ static bool process_one_frame = true;
 static int current_frame;
 
 static int next_frame(RenderData *rd);
-static int change_active_request(char *req)
+static int change_active_request(char *req);
 
 
 #if defined(_WIN32)
@@ -176,7 +176,7 @@ void BKE_server_stop(void)
 	shutdown_socket_system();
 }
 
-int BKE_frameserver_start(struct Scene *scene, RenderData *UNUSED(rd), int rectx, int recty, ReportList *reports)
+int BKE_frameserver_start(struct Scene *scene, RenderData *rd, int rectx, int recty, ReportList *reports)
 {
 	(void)scene; /* unused */
 
@@ -238,7 +238,7 @@ static int safe_puts(char *s)
 
 static int next_frame(RenderData *rd)
 {
-	currframe += 1;
+	current_frame += 1;
 	printf(".");
 	if (current_frame > rd->efra) {
 		printf(".\n");
@@ -281,7 +281,7 @@ static int handle_request(RenderData *rd, char *req)
 	/* Resets the render. This will stop the actual render. */
 	if (pathlen > 12 && memcmp(path, "/new_render?", 12) == 0) {
 		char buf[4096];
-		if (change_active_request(path+12 != 0)) {
+		if (change_active_request(path+12) != 0) {
 			sprintf(buf,
 				"HTTP/1.1 200 OK\r\n"
 				"Content-Type: text/html\r\n"
@@ -353,7 +353,7 @@ int BKE_frameserver_loop(RenderData *rd, ReportList *reports)
 
 	/* accept a new connection to the server*/
 	if (connsock == -1) {
-		if ((connsock = accept(sock, (struct sockaddr *) &addr, socklen)) < 0) {
+		if ((connsock = accept(sock, (struct sockaddr *) &addr, &socklen)) < 0) {
 			BKE_report(reports, RPT_ERROR, "accept fail");
 			return -1;
 		}
@@ -465,7 +465,7 @@ static void serve_ppm(int *pixels, int rectx, int recty)
 	free(row);
 }
 
-int BKE_frameserver_append(RenderData *UNUSED(rd), int UNUSED(start_frame), int frame, int *pixels,
+int BKE_frameserver_append(RenderData *UNUSED(rd), int UNUSED(start_frame), int UNUSED(frame), int *pixels,
                            int rectx, int recty, ReportList *UNUSED(reports))
 {
 	if (write_ppm) {
@@ -489,7 +489,7 @@ void BKE_frameserver_end(void)
 
 /* Python module section */
 
-static char _last_request[REQUEST_MAX_LEN] = "";
+static char _last_request[REQ_MAX_LEN] = "";
 
 static int change_active_request(char *req)
 {
@@ -503,8 +503,8 @@ static int change_active_request(char *req)
 	strftime(time_buffer, 25, "%Y:%m:%d %H:%M:%S", tm_info);
 	fprintf(stderr, "[%s] New request with params: %s\n", time_buffer, req);
 
-	strncpy(_last_request, req, REQUEST_MAX_LEN);
-	_last_request[REQUEST_MAX_LEN-1] = '\0';
+	strncpy(_last_request, req, REQ_MAX_LEN);
+	_last_request[REQ_MAX_LEN-1] = '\0';
 	return 0;
 }
 
