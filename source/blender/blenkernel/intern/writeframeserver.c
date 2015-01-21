@@ -68,7 +68,7 @@
 
 #include "DNA_scene_types.h"
 
-#define SOCK_CLOSE(s) closesocket(s); s = -1
+#define SOCK_CLOSE(s) printf("closing socket\n"); closesocket(s); s = -1
 
 static int sock;
 static int connsock;
@@ -254,6 +254,8 @@ static int handle_request(RenderData *rd, char *req)
 	char *path;
 	int pathlen;
 
+	printf("Handling request %s\n", req);
+
 	/* This will stop the render */
 	if (req[0] == '\0') {
 		return next_frame(rd);
@@ -280,22 +282,18 @@ static int handle_request(RenderData *rd, char *req)
 
 	/* Resets the render. This will stop the actual render. */
 	if (pathlen > 12 && memcmp(path, "/new_render?", 12) == 0) {
-		char buf[4096];
+		char buf[64];
+		/* Send the header first */
+		safe_puts("HTTP/1.1 200 OK\r\n"
+				  "Content-Type: text/html\r\n"
+				  "\r\n"
+		);
 		if (change_active_request(path+12) != 0) {
-			sprintf(buf,
-				"HTTP/1.1 200 OK\r\n"
-				"Content-Type: text/html\r\n"
-				"\r\n"
-				"error\n"
-			);
+			sprintf(buf, "error\n");
 		} else {
-			sprintf(buf,
-				"HTTP/1.1 200 OK\r\n"
-				"Content-Type: text/html\r\n"
-				"\r\n"
-				"ok\n"
-			);
+			sprintf(buf, "ok\n");
 		}
+		/* Send if it was an error or not */
 		safe_puts(buf);
 		G.is_break = true;
 		return -1;
@@ -348,6 +346,8 @@ int BKE_frameserver_loop(RenderData *rd, ReportList *reports)
 	unsigned int socklen;
 #endif
 	char buf[4096];
+	bool need_recv = (connsock == -1);
+	printf("connsock in loop: %d\n", connsock);
 
 	socklen = sizeof(addr);
 
@@ -359,7 +359,7 @@ int BKE_frameserver_loop(RenderData *rd, ReportList *reports)
 		}
 	}
 
-	if (connsock == -1) {
+	if (need_recv) {
 		FD_ZERO(&readfds);
 		FD_SET(sock, &readfds);
 
@@ -368,13 +368,11 @@ int BKE_frameserver_loop(RenderData *rd, ReportList *reports)
 			tv.tv_usec = 0;
 
 			rval = select(connsock + 1, &readfds, NULL, NULL, &tv);
-			if (rval > 0) {
+			printf("Select returend %d\n", rval);
+			if (rval >= 0) {
 				break;
 			}
-			else if (rval == 0) {
-				return -1;
-			}
-			else if (rval < 0) {
+			else {
 				if (!select_was_interrupted_by_signal()) {
 					return -1;
 				}

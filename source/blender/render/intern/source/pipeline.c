@@ -149,6 +149,7 @@ static int default_break(void *UNUSED(arg)) { return G.is_break == true; }
 
 static void stats_background(void *UNUSED(arg), RenderStats *rs)
 {
+/*
 	uintptr_t mem_in_use, mmap_in_use, peak_memory;
 	float megs_used_memory, mmap_used_memory, megs_peak_memory;
 
@@ -183,6 +184,7 @@ static void stats_background(void *UNUSED(arg), RenderStats *rs)
 
 	fputc('\n', stdout);
 	fflush(stdout);
+*/
 }
 
 void RE_FreeRenderResult(RenderResult *res)
@@ -1893,7 +1895,7 @@ static void tag_scenes_for_render(Render *re)
 							BKE_reportf(re->reports, RPT_WARNING, "Setting scene %s alpha mode to Premul", scene->id.name + 2);
 
 							/* also print, so feedback is immediate */
-							printf("2.66 versioning fix: setting scene %s alpha mode to Premul\n", scene->id.name + 2);
+							//printf("2.66 versioning fix: setting scene %s alpha mode to Premul\n", scene->id.name + 2);
 
 							scene->r.alphamode = R_ALPHAPREMUL;
 						}
@@ -2821,7 +2823,7 @@ void RE_BlenderFrame(Render *re, Main *bmain, Scene *scene, SceneRenderLayer *sr
 		if (write_still && !G.is_break) {
 			if (BKE_imtype_is_movie(scene->r.im_format.imtype)) {
 				/* operator checks this but in case its called from elsewhere */
-				printf("Error: cant write single images with a movie format!\n");
+				//printf("Error: cant write single images with a movie format!\n");
 			}
 			else {
 				char name[FILE_MAX];
@@ -2905,7 +2907,7 @@ static int do_write_image_or_movie(Render *re, Main *bmain, Scene *scene, bMovie
 		/* imbuf knows which rects are not part of ibuf */
 		IMB_freeImBuf(ibuf);
 
-		printf("Append frame %d", scene->r.cfra);
+		/* printf("Append frame %d", scene->r.cfra); */
 	}
 	else {
 		if (name_override)
@@ -2917,7 +2919,7 @@ static int do_write_image_or_movie(Render *re, Main *bmain, Scene *scene, bMovie
 		if (re->r.im_format.imtype == R_IMF_IMTYPE_MULTILAYER) {
 			if (re->result) {
 				RE_WriteRenderResult(re->reports, re->result, name, scene->r.im_format.exr_codec);
-				printf("Saved: %s", name);
+				//printf("Saved: %s", name);
 			}
 		}
 		else {
@@ -2929,9 +2931,9 @@ static int do_write_image_or_movie(Render *re, Main *bmain, Scene *scene, bMovie
 			ok = BKE_imbuf_write_stamp(scene, camera, ibuf, name, &scene->r.im_format);
 			
 			if (ok == 0) {
-				printf("Render error: cannot save %s\n", name);
+				//printf("Render error: cannot save %s\n", name);
 			}
-			else printf("Saved: %s", name);
+			//else printf("Saved: %s", name);
 			
 			/* optional preview images for exr */
 			if (ok && scene->r.im_format.imtype == R_IMF_IMTYPE_OPENEXR && (scene->r.im_format.flag & R_IMF_FLAG_PREVIEW_JPG)) {
@@ -2947,7 +2949,7 @@ static int do_write_image_or_movie(Render *re, Main *bmain, Scene *scene, bMovie
 				                                    &scene->display_settings, &imf);
 
 				BKE_imbuf_write_stamp(scene, camera, ibuf, name, &imf);
-				printf("\nSaved: %s", name);
+				//printf("\nSaved: %s", name);
 			}
 			
 			/* imbuf knows which rects are not part of ibuf */
@@ -2961,12 +2963,12 @@ static int do_write_image_or_movie(Render *re, Main *bmain, Scene *scene, bMovie
 	re->i.lastframetime = PIL_check_seconds_timer() - re->i.starttime;
 	
 	BLI_timestr(re->i.lastframetime, name, sizeof(name));
-	printf(" Time: %s", name);
+	//printf(" Time: %s", name);
 	
 	BLI_callback_exec(G.main, NULL, BLI_CB_EVT_RENDER_STATS);
 
 	BLI_timestr(re->i.lastframetime - render_time, name, sizeof(name));
-	printf(" (Saving: %s)\n", name);
+	//printf(" (Saving: %s)\n", name);
 	
 	fputc('\n', stdout);
 	fflush(stdout); /* needed for renderd !! (not anymore... (ton)) */
@@ -3077,7 +3079,7 @@ void RE_BlenderAnim(Render *re, Main *bmain, Scene *scene, Object *camera_overri
 					                  &scene->r.im_format, (scene->r.scemode & R_EXTENSION) != 0, true);
 
 				if (scene->r.mode & R_NO_OVERWRITE && BLI_exists(name)) {
-					printf("skipping existing frame \"%s\"\n", name);
+					//printf("skipping existing frame \"%s\"\n", name);
 					totskipped++;
 					continue;
 				}
